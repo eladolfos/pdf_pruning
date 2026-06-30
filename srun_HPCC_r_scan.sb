@@ -113,9 +113,21 @@ echo ""
 ################################################################################
 
 # Option 1: Use Conda environment (recommended)
-# If you've already created the conda environment:
+# Initialize conda and activate the pdf_pruning environment
 echo "Activating conda environment..."
-source activate pdf_pruning
+
+# Find conda installation
+CONDA_BASE=$(conda info --base)
+if [ -z "$CONDA_BASE" ]; then
+    echo "ERROR: Could not find conda installation"
+    exit 1
+fi
+
+# Source conda initialization
+source "$CONDA_BASE/etc/profile.d/conda.sh"
+
+# Activate environment
+conda activate pdf_pruning
 if [ $? -ne 0 ]; then
     echo "ERROR: Could not activate conda environment 'pdf_pruning'"
     echo "Create it first with:"

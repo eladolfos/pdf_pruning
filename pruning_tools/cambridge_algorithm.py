@@ -9,6 +9,7 @@ def cambridge_cluster(
     ids=None,
     rec_crit: str = "average",
     chi2=None,
+    CompleteLinkage: bool = False,
 ) -> list[dict]:
     """
     Cambridge/Aachen sequential recombination clustering for
@@ -17,10 +18,25 @@ def cambridge_cluster(
     Clustering is purely geometric (p=0): no weights, no chi2 in the
     *distance*, no physics. The distance metric is fully delegated to
     the caller. What changes here is the *recombination scheme*: how a
-    merged pair is represented afterwards.
+    merged pair is represented afterwards, and (new) the *merge rule*
+    itself, controlled by CompleteLinkage.
+
+    Merge rule (CompleteLinkage)
+    -----------------------------
+    False : (default, original behaviour) SINGLE-linkage. Two particles
+            merge if the distance between their two closest members is
+            below R. This is fast, but does NOT guarantee that every
+            pair of replicas inside a finished cluster is within R of
+            each other (replicas can "chain" together through
+            intermediate neighbours).
+    True  : COMPLETE-linkage. Two particles merge only if the distance
+            between their two FARTHEST members is still below R. This
+            guarantees that every pair of replicas inside a finished
+            cluster satisfies D(i, j) <= R. Clusters tend to be smaller
+            and more numerous, but the similarity guarantee is strict.
 
     Recombination schemes (rec_crit)
-    --------------------------------
+    ----------------------------------
     "average"  : (default, original behaviour) the merged particle is the
                  simple average of the two merging vectors. This introduces
                  a *new* vector that does not correspond to any input
@@ -54,6 +70,12 @@ def cambridge_cluster(
         with rec_crit="average", it is not used for recombination but the
         best-chi2 member of each cluster is still reported (useful for
         comparing the two schemes on the same footing).
+    CompleteLinkage : bool, default False
+        If True, switches the merge rule from single-linkage to
+        complete-linkage (see above). Strongly recommended together
+        with rec_crit="best_chi2" if you need the mathematical
+        guarantee that every pair inside a cluster satisfies
+        D(i, j) <= R.
 
     Returns
     -------
@@ -72,6 +94,11 @@ def cambridge_cluster(
                                             None if no chi2 was provided)
         best_chi2_value            : float (its chi2, or None)
         best_chi2_vector           : np.ndarray (that member's vector, or None)
+        max_internal_dissimilarity : float (only meaningful diagnostic field;
+                                            the largest D(i, j) found between
+                                            any two members of this cluster.
+                                            When CompleteLinkage=True this is
+                                            guaranteed to be <= R.)
 
     Notes
     -----
@@ -82,16 +109,26 @@ def cambridge_cluster(
 
     Examples
     --------
-    Euclidean, original averaging scheme
+    Euclidean, original averaging scheme (single-linkage, as before)
         cambridge_cluster(vectors, metric=lambda v1, v2: float(np.sum((v1 - v2) ** 2)))
 
-    Keep the best-chi2 replica instead of averaging
+    Keep the best-chi2 replica instead of averaging (still single-linkage)
         cambridge_cluster(
             vectors,
             metric=lambda v1, v2: float(np.sum((v1 - v2) ** 2)),
             R=1.0,
             rec_crit="best_chi2",
             chi2=chi2_array,
+        )
+
+    Strict version: guarantee D(i, j) <= R for every pair in every cluster
+        cambridge_cluster(
+            vectors,
+            metric=lambda v1, v2: float(np.sum((v1 - v2) ** 2)),
+            R=1.0,
+            rec_crit="best_chi2",
+            chi2=chi2_array,
+            CompleteLinkage=True,
         )
     """
     vectors = np.array(vectors, dtype=np.float64)
@@ -125,7 +162,12 @@ def cambridge_cluster(
             "rec_crit='best_chi2' requires the chi2 array (one chi2 per vector)."
         )
 
-    # Build a lookup from id -> original vector for centroid comparisons later.
+    # Build a lookup from id -> original vector. This is used for:
+    #   - centroid comparisons at the end (always)
+    #   - complete-linkage distance checks during merging (only if
+    #     CompleteLinkage=True), since we then need to compare EVERY
+    #     original replica in one particle against EVERY original
+    #     replica in the other, not just the current representatives.
     id_to_vector = {ids[i]: vectors[i] for i in range(N)}
 
     # ------------------------------------------------------------------ #
@@ -148,6 +190,30 @@ def cambridge_cluster(
     final_clusters = []
     cluster_counter = 0
     R_sq = R * R
+
+    # ------------------------------------------------------------------ #
+    # Helper: complete-linkage distance between two particles               #
+    # ------------------------------------------------------------------ #
+    def max_pairwise_distance(particle_a, particle_b):
+        """
+        Complete-linkage distance: the LARGEST dissimilarity found between
+        any original replica in particle_a and any original replica in
+        particle_b.
+
+        This is the key difference vs. single-linkage, which only looks
+        at the current representative vectors. Here we loop over every
+        original member id stored in each particle, so the result reflects
+        the true worst-case pair, even many merges later.
+        """
+        d_max = 0.0
+        for id_a in particle_a["id"]:
+            for id_b in particle_b["id"]:
+                # metric() returns the same "delta" used by the rest of
+                # the algorithm (e.g. squared distance, SMAPE, etc.)
+                d = metric(id_to_vector[id_a], id_to_vector[id_b])
+                if d > d_max:
+                    d_max = d
+        return d_max
 
     # ------------------------------------------------------------------ #
     # Main loop                                                            #
@@ -174,9 +240,21 @@ def cambridge_cluster(
         # Pair distances
         for loc, idx_i in enumerate(active):
             for idx_j in active[loc + 1:]:
-                delta_sq = metric(particles[idx_i]["vector"],
-                                  particles[idx_j]["vector"])
-                d_ij = delta_sq*delta_sq / R_sq      # beam distance is 1 for both
+
+                if CompleteLinkage:
+                    # ---- NEW: complete-linkage check -------------------- #
+                    # Look at the WORST pair across all original replicas
+                    # in both particles, not just the two representatives.
+                    # This is what guarantees D(i, j) <= R for every pair
+                    # inside a finished cluster.
+                    delta = max_pairwise_distance(particles[idx_i], particles[idx_j])
+                else:
+                    # ---- ORIGINAL: single-linkage check ----------------- #
+                    # Only compares the two current representative vectors.
+                    delta = metric(particles[idx_i]["vector"],
+                                    particles[idx_j]["vector"])
+
+                d_ij = delta * delta / R_sq      # beam distance is 1 for both
                 if d_ij < min_dist:
                     min_dist   = d_ij
                     merge_pair = (idx_i, idx_j)
@@ -219,6 +297,21 @@ def cambridge_cluster(
                 cluster["best_chi2_id"]     = None
                 cluster["best_chi2_value"]  = None
                 cluster["best_chi2_vector"] = None
+
+            # Diagnostic field: the largest dissimilarity found between any
+            # two members of this cluster. With CompleteLinkage=True this
+            # is guaranteed to be <= R; with CompleteLinkage=False it can
+            # be larger than R (that is exactly the chaining problem this
+            # option fixes).
+            if len(pt["id"]) > 1:
+                worst = 0.0
+                for a in range(len(pt["id"])):
+                    for b in range(a + 1, len(pt["id"])):
+                        d = metric(id_to_vector[pt["id"][a]], id_to_vector[pt["id"][b]])
+                        worst = max(worst, d)
+                cluster["max_internal_dissimilarity"] = worst
+            else:
+                cluster["max_internal_dissimilarity"] = 0.0
 
             final_clusters.append(cluster)
             particles[i]["active"] = False

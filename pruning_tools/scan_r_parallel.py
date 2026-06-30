@@ -20,6 +20,9 @@ Usage
             vectors,
             metric="euclidean_sq",        # string key, or a TOP-LEVEL function
             R_values=R_values,
+            rec_crit="best_chi2",
+            chi2=chi2_array,
+            CompleteLinkage=True,         # <-- NEW: use the strict merge rule
         )
         for R, s in results.items():
             print(R, s["n_clusters"])
@@ -82,13 +85,19 @@ def _resolve_metric(metric_spec):
 _WS = {}  # worker state
 
 
-def _init_worker(vectors, metric_spec, ids, rec_crit, chi2):
-    """Runs once in each worker; stores the shared, R-independent inputs."""
+def _init_worker(vectors, metric_spec, ids, rec_crit, chi2, CompleteLinkage):
+    """Runs once in each worker; stores the shared, R-independent inputs.
+
+    CompleteLinkage is just another R-independent setting (like rec_crit
+    or chi2), so it is stored here once and reused for every R value that
+    this worker process handles.
+    """
     _WS["vectors"] = np.asarray(vectors, dtype=np.float64)
     _WS["metric"] = _resolve_metric(metric_spec)
     _WS["ids"] = ids
     _WS["rec_crit"] = rec_crit
     _WS["chi2"] = chi2
+    _WS["CompleteLinkage"] = CompleteLinkage
 
 
 def _summarize_clusters(clusters, R, keep_full_clusters):
@@ -112,6 +121,17 @@ def _summarize_clusters(clusters, R, keep_full_clusters):
         summary["best_chi2_ids"] = None
         summary["best_chi2_values"] = None
 
+    # Diagnostic: largest within-cluster dissimilarity, found across all
+    # clusters at this R. With CompleteLinkage=True this is guaranteed to
+    # be <= R; with CompleteLinkage=False it can exceed R (chaining).
+    # Only present if cambridge_cluster reports the field (it does, in the
+    # CompleteLinkage-aware version).
+    if clusters and "max_internal_dissimilarity" in clusters[0]:
+        worst_vals = [c["max_internal_dissimilarity"] for c in clusters]
+        summary["max_internal_dissimilarity_overall"] = float(max(worst_vals)) if worst_vals else 0.0
+    else:
+        summary["max_internal_dissimilarity_overall"] = None
+
     if keep_full_clusters:
         summary["clusters"] = clusters
 
@@ -127,6 +147,7 @@ def _cluster_one_R(R, keep_full_clusters):
         ids=_WS["ids"],
         rec_crit=_WS["rec_crit"],
         chi2=_WS["chi2"],
+        CompleteLinkage=_WS["CompleteLinkage"],
     )
     return float(R), _summarize_clusters(clusters, R, keep_full_clusters)
 
@@ -141,6 +162,7 @@ def scan_R_parallel(
     ids=None,
     rec_crit="average",
     chi2=None,
+    CompleteLinkage=False,
     n_workers=None,
     keep_full_clusters=False,
 ):
@@ -160,6 +182,17 @@ def scan_R_parallel(
     ids, rec_crit, chi2 :
         Passed straight through to `cambridge_cluster`. Note that
         rec_crit="best_chi2" requires `chi2`.
+    CompleteLinkage : bool, default False
+        Passed straight through to `cambridge_cluster` for every R value.
+            False : original single-linkage merge rule (a pair merges if
+                    the distance between the two closest members is < R).
+            True  : strict complete-linkage merge rule (a pair only merges
+                    if the distance between the two FARTHEST members is
+                    <= R). This guarantees that every pair of replicas
+                    inside every returned cluster satisfies D(i,j) <= R,
+                    at every R value scanned.
+        This is the same flag for every worker and every R: it changes how
+        clusters are formed, not which R values are tested.
     n_workers : int, optional
         Number of worker processes. Defaults to (cpu_count - 1), min 1.
     keep_full_clusters : bool
@@ -172,7 +205,8 @@ def scan_R_parallel(
         { R_value : summary_dict, ... }, ordered by increasing R. Each
         summary_dict contains:
             R, n_clusters, cluster_sizes, n_singletons, largest_cluster,
-            mean_cluster_size, best_chi2_ids, best_chi2_values
+            mean_cluster_size, best_chi2_ids, best_chi2_values,
+            max_internal_dissimilarity_overall
             (+ "clusters" if keep_full_clusters=True)
     """
     vectors = np.asarray(vectors, dtype=np.float64)
@@ -186,7 +220,9 @@ def scan_R_parallel(
     # No point spawning more workers than tasks.
     n_workers = min(n_workers, len(R_values))
 
+    linkage_label = "complete-linkage" if CompleteLinkage else "single-linkage"
     print(f"Starting scan of {len(R_values)} R values using {n_workers} cores")
+    print(f"Merge rule: {linkage_label} (CompleteLinkage={CompleteLinkage})")
     print(f"R range: [{R_values[0]:.4f}, {R_values[-1]:.4f}]")
     print(f"R values to analyze: {R_values}")
 
@@ -201,6 +237,7 @@ def scan_R_parallel(
             clusters = cambridge_cluster(
                 vectors, metric=metric_fn, R=R, ids=ids,
                 rec_crit=rec_crit, chi2=chi2,
+                CompleteLinkage=CompleteLinkage,
             )
             results[R] = _summarize_clusters(clusters, R, keep_full_clusters)
 
@@ -223,7 +260,7 @@ def scan_R_parallel(
     with ProcessPoolExecutor(
         max_workers=n_workers,
         initializer=_init_worker,
-        initargs=(vectors, metric, ids, rec_crit, chi2),
+        initargs=(vectors, metric, ids, rec_crit, chi2, CompleteLinkage),
     ) as ex:
         futures = {
             ex.submit(_cluster_one_R, R, keep_full_clusters): R

@@ -2,8 +2,7 @@
 # Install with: conda env create -f environment.yml
 # Activate with: conda activate pdf_pruning
 #
-# Note for MSU HPCC: LHAPDF is installed via pip (not conda) due to channel issues.
-# Alternatively, you can load LHAPDF via: module load LHAPDF/6.3.0
+# Note for MSU HPCC: LHAPDF is now installed via conda (works reliably)
 # See the SLURM script: srun_HPCC_r_scan.sb
 
 name: pdf_pruning
@@ -18,6 +17,10 @@ dependencies:
   - scipy>=1.7.0,<2.0.0
   - plotly>=5.0.0,<6.0.0
 
+  # PDF (Parton Distribution Function) handling
+  # Installed via conda-forge (works reliably on HPCC)
+  - lhapdf
+
   # Jupyter (optional but useful for development)
   - jupyter>=1.0.0
   - notebook>=6.4.0
@@ -26,10 +29,3 @@ dependencies:
   - pytest>=6.0.0
   - black>=21.0.0
   - flake8>=3.9.0
-
-  # pip dependencies not in conda
-  - pip
-  - pip:
-    # PDF (Parton Distribution Function) handling
-    # Installed via pip (not conda-forge to avoid channel issues on HPCC)
-    - lhapdf>=6.0.0
