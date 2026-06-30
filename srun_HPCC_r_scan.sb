@@ -83,17 +83,29 @@ echo "Loading modules..."
 # Common: python/3.10, python/3.11, python/3.12
 module load Python/3.10.10
 
-# Load LHAPDF if available via module system (optional but recommended)
+# Load LHAPDF if available via module system (optional)
 # Check with: module avail lhapdf
-# If not available, LHAPDF should be installed in your Python environment
-# Uncomment the line below if LHAPDF is available as a module:
+# If available, uncomment the line below. If not, LHAPDF will be installed via pip.
+# Uncomment if LHAPDF module is available:
 # module load LHAPDF/6.3.0
 
-# Load a C/C++ compiler (optional, useful for numpy/scipy compilation)
+# Load a C/C++ compiler (optional, useful for numpy/scipy compilation if needed)
 # module load GCCcore/11.3.0
 
 echo "Loaded modules:"
 module list
+echo ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Check for LHAPDF availability
+# ─────────────────────────────────────────────────────────────────────────────
+echo "Checking LHAPDF availability..."
+if lhapdf-config --version >/dev/null 2>&1; then
+    echo "✓ LHAPDF found via module system"
+else
+    echo "⚠ LHAPDF not found via module. Will try to use pip-installed version."
+    echo "  (If LHAPDF-dependent functions fail, try: module load LHAPDF)"
+fi
 echo ""
 
 ################################################################################

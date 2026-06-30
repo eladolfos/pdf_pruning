@@ -92,11 +92,24 @@ Then edit `srun_HPCC_r_scan.sb` to use the venv option (lines ~115-123).
 
 #### Troubleshooting LHAPDF Installation
 
-LHAPDF can be tricky to install. If you encounter issues:
+If you get an error like:
+```
+UnavailableInvalidChannel: HTTP 404 Not Found for channel lhapdf
+```
 
-**Option 1: Load LHAPDF module** (easiest if available)
+**See: LHAPDF_INSTALL_FIX.md** for detailed solutions.
+
+Quick fix:
+1. Delete broken environment: `conda env remove --name pdf_pruning`
+2. Recreate with updated `environment.yml`: `conda env create -f environment.yml`
+   (Now uses pip for LHAPDF, which is more reliable)
+
+**Alternative options:**
+
+**Option 1: Load LHAPDF as a module** (if available on HPCC)
 ```bash
 module load LHAPDF/6.3.0
+conda env create -f environment_no_lhapdf.yml
 ```
 
 Check if available:
@@ -104,17 +117,16 @@ Check if available:
 module avail lhapdf
 ```
 
-**Option 2: Build from source**
+**Option 2: Skip LHAPDF entirely**
+Use the no-LHAPDF environment (works for clustering/visualization):
 ```bash
-# Download LHAPDF source, compile, and point your Python to it
-# This is advanced; ask HPCC support if needed
+conda env create -f environment_no_lhapdf.yml
+conda activate pdf_pruning
 ```
 
-**Option 3: Skip LHAPDF for now**
-If your R-scan script doesn't strictly require LHAPDF, comment it out in `analysis.py` temporarily:
-```python
-# import lhapdf  # <-- comment this
-```
+**Option 3: Contact HPCC support**
+- Email: hpcc-support@msu.edu
+- Ask about LHAPDF Python bindings installation
 
 ### Step 4: Configure the SLURM Script
 
