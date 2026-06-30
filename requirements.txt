@@ -1,0 +1,19 @@
+# Core dependencies for pdf_pruning package
+# Install with: pip install -r requirements.txt
+
+# Numerical computing
+numpy>=1.20.0,<2.0.0
+
+# Data manipulation and analysis
+pandas>=1.3.0,<3.0.0
+
+# Scientific computing
+scipy>=1.7.0,<2.0.0
+
+# Interactive visualizations
+plotly>=5.0.0,<6.0.0
+
+# PDF (Parton Distribution Function) handling
+# Note: LHAPDF may need to be installed separately on HPC systems
+# See: https://lhapdf.hepforge.org/
+lhapdf>=6.0.0

@@ -1,0 +1,155 @@
+#!/bin/bash
+################################################################################
+# SLURM Batch Script for PDF Pruning R-Scan on MSU HPCC
+#
+# This script runs HPCC_r_scan.py on the Michigan State University HPCC cluster.
+# It performs a parallel scan of the clustering radius (R) parameter across
+# multiple values using the Cambridge-Aachen algorithm.
+#
+# Usage:
+#   sbatch srun_HPCC_r_scan.sb
+#
+# To run with custom parameters, edit the #SBATCH directives below or pass them
+# on the command line:
+#   sbatch --time=01:00:00 --ntasks-per-node=16 srun_HPCC_r_scan.sb
+#
+# For help with SLURM directives, see: https://slurm.schedmd.com/sbatch.html
+# MSU HPCC Guide: https://wiki.hpcc.msu.edu/display/ITH/Slurm
+################################################################################
+
+#SBATCH --job-name=pdf_pruning_r_scan
+#SBATCH --output=%x_%j.log
+#SBATCH --error=%x_%j.err
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Resource Allocation
+# ─────────────────────────────────────────────────────────────────────────────
+# Number of tasks (1 task manages parallelization internally via ProcessPoolExecutor)
+#SBATCH --ntasks=1
+
+# Number of cores per task (will be used by scan_R_parallel for worker processes)
+# Adjust based on your needs: 8, 16, 32, 40, etc.
+# Higher = faster but more contention with other users
+#SBATCH --cpus-per-task=16
+
+# Memory per node (total, not per core)
+# Adjust based on vector size and number of R values being scanned
+# Start with 16GB, increase if you get OOM errors
+#SBATCH --mem=16G
+
+# Walltime (wall-clock time limit for the job)
+# Format: HH:MM:SS
+# Adjust based on expected runtime. Start with 30 min for testing.
+#SBATCH --time=00:30:00
+
+# Queue/partition (adjust if needed)
+# Common queues on MSU HPCC: standard, short, long, gpu
+# Check available with: sinfo
+#SBATCH --partition=standard
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Email Notifications (optional)
+# ─────────────────────────────────────────────────────────────────────────────
+# Uncomment to receive email when job starts, ends, fails, or is requeued
+# #SBATCH --mail-type=BEGIN,END,FAIL,REQUEUE
+# #SBATCH --mail-user=your_email@msu.edu
+
+################################################################################
+# Setup & Initialization
+################################################################################
+
+echo "=========================================="
+echo "SLURM Job Information"
+echo "=========================================="
+echo "Job ID:     $SLURM_JOB_ID"
+echo "Job Name:   $SLURM_JOB_NAME"
+echo "Node:       $SLURM_NODELIST"
+echo "Cores:      $SLURM_CPUS_PER_TASK"
+echo "Memory:     $SLURM_MEM_PER_NODE MB"
+echo "Start Time: $(date)"
+echo "=========================================="
+echo ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Load Modules
+# ─────────────────────────────────────────────────────────────────────────────
+# Note: Module names and versions vary by HPCC system. Adjust as needed.
+# Common modules: Python, GCC (for compiled extensions), LHAPDF (for PDF handling)
+
+echo "Loading modules..."
+
+# Load Python (required)
+# Check available versions with: module avail python
+# Common: python/3.10, python/3.11, python/3.12
+module load Python/3.10.10
+
+# Load LHAPDF if available via module system (optional but recommended)
+# Check with: module avail lhapdf
+# If not available, LHAPDF should be installed in your Python environment
+# Uncomment the line below if LHAPDF is available as a module:
+# module load LHAPDF/6.3.0
+
+# Load a C/C++ compiler (optional, useful for numpy/scipy compilation)
+# module load GCCcore/11.3.0
+
+echo "Loaded modules:"
+module list
+echo ""
+
+################################################################################
+# Activate Python Environment
+################################################################################
+
+# Option 1: Use Conda environment (recommended)
+# If you've already created the conda environment:
+echo "Activating conda environment..."
+source activate pdf_pruning
+if [ $? -ne 0 ]; then
+    echo "ERROR: Could not activate conda environment 'pdf_pruning'"
+    echo "Create it first with:"
+    echo "  conda env create -f environment.yml"
+    exit 1
+fi
+echo "Using Python from: $(which python)"
+echo "Python version: $(python --version)"
+echo ""
+
+# Option 2: Use venv (if you prefer virtualenv over conda)
+# Uncomment these lines instead:
+# if [ -d "venv" ]; then
+#     echo "Activating venv..."
+#     source venv/bin/activate
+# else
+#     echo "ERROR: venv directory not found. Create with:"
+#     echo "  python -m venv venv"
+#     exit 1
+# fi
+
+################################################################################
+# Run the Script
+################################################################################
+
+echo "Starting PDF Pruning R-Scan..."
+echo "Script: HPCC_r_scan.py"
+echo "Workers: Will use $(( $SLURM_CPUS_PER_TASK - 1 )) cores (excluding 1 for main process)"
+echo ""
+
+# Export OMP_NUM_THREADS to prevent oversubscription of threads
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+# Run the main script
+python HPCC_r_scan.py
+SCRIPT_EXIT_CODE=$?
+
+echo ""
+echo "=========================================="
+if [ $SCRIPT_EXIT_CODE -eq 0 ]; then
+    echo "Script completed successfully!"
+    echo "Output file: R_scan.npy"
+else
+    echo "ERROR: Script failed with exit code $SCRIPT_EXIT_CODE"
+fi
+echo "End Time:   $(date)"
+echo "=========================================="
+
+exit $SCRIPT_EXIT_CODE

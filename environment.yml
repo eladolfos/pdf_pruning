@@ -1,0 +1,37 @@
+# Conda environment file for pdf_pruning package
+# Install with: conda env create -f environment.yml
+# Activate with: conda activate pdf_pruning
+#
+# Note for MSU HPCC: Some packages like LHAPDF may need to be loaded via module system.
+# See the SLURM script for example: srun_HPCC_r_scan.sb
+
+name: pdf_pruning
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  # Core dependencies
+  - python=3.10
+  - numpy>=1.20.0,<2.0.0
+  - pandas>=1.3.0,<3.0.0
+  - scipy>=1.7.0,<2.0.0
+  - plotly>=5.0.0,<6.0.0
+
+  # PDF (Parton Distribution Function) handling
+  # Note: On HPC systems, LHAPDF is often available via 'module load lhapdf'
+  # If installing via conda-forge, this is available:
+  - lhapdf::lhapdf>=6.0.0
+
+  # Jupyter (optional but useful for development)
+  - jupyter>=1.0.0
+  - notebook>=6.4.0
+
+  # Development tools (optional)
+  - pytest>=6.0.0
+  - black>=21.0.0
+  - flake8>=3.9.0
+
+  # pip dependencies not in conda
+  - pip
+  - pip:
+    # Add any pip-only packages here if needed
